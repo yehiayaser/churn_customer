@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Streamlit
+.streamlit/
+.cache/
+
+# Environment
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*~
+.swp
+.swo
+tempCodeRunnerFile.py
+
+# Data files (optional - comment out if you want to include CSV)
+# *.csv
+
+# Model files (optional - comment out if you want to include .sav)
+# *.sav
