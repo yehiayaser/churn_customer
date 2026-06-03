@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 # Get the directory of the current script
 BASE_DIR = Path(__file__).parent
@@ -20,16 +19,49 @@ except Exception as e:
     st.error(f"❌ Error loading model: {e}")
     model = None
 
-# Load dataset to fit scalers
+# Load and preprocess dataset to get expected feature names
 try:
     df_data = pd.read_csv(data_path)
-    # Fit the StandardScaler on the full training data for scaling consistency
-    scaler = StandardScaler()
-    # Note: In production, you should save the scaler with the model
+    
+    # Apply same preprocessing as training
+    df_data.drop('customerID', axis=1, inplace=True)
+    df_data['TotalCharges'] = pd.to_numeric(df_data['TotalCharges'], errors='coerce').fillna(0)
+    df_data.drop_duplicates(inplace=True)
+    
+    # Binary encoding
+    binary_cols = ['gender', 'Partner', 'Dependents', 'PhoneService', 'PaperlessBilling', 'SeniorCitizen']
+    for col in binary_cols:
+        if col in df_data.columns:
+            if col == 'gender':
+                df_data[col] = (df_data[col] == 'Male').astype(int)
+            else:
+                df_data[col] = (df_data[col] == 'Yes').astype(int)
+    
+    # One-hot encoding
+    ohe_cols = ['MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup',
+                'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies', 'Contract', 'PaymentMethod']
+    df_data = pd.get_dummies(df_data, columns=ohe_cols, drop_first=False).astype(int)
+    
+    # Get Churn column and remove it
+    if 'Churn' in df_data.columns:
+        df_data.drop('Churn', axis=1, inplace=True)
+    
+    # Feature engineering
+    df_data['ChargesPerMonth'] = df_data['TotalCharges'] / (df_data['tenure'] + 1)
+    df_data['Charge_x_Tenure'] = df_data['MonthlyCharges'] * df_data['tenure']
+    df_data['TenureBucket'] = np.where(df_data['tenure'] <= 12, 0, 
+                                       np.where(df_data['tenure'] <= 24, 1, 
+                                       np.where(df_data['tenure'] <= 48, 2, 3)))
+    
+    service_cols = [col for col in df_data.columns if col.endswith('_Yes')]
+    df_data['TotalServices'] = df_data[service_cols].sum(axis=1)
+    
+    # Get expected feature names and order
+    EXPECTED_FEATURES = df_data.columns.tolist()
+    
 except Exception as e:
     st.error(f"❌ Error loading dataset: {e}")
-    df_data = None
-    scaler = None
+    EXPECTED_FEATURES = None
 
 st.title("📊 Customer Churn Prediction")
 st.info('Predict customer churn using Machine Learning')
@@ -173,20 +205,24 @@ for feature in ['PaperlessBilling', 'PaymentMethod', 'MonthlyCharges', 'TotalCha
 def preprocess_input(input_dict):
     """
     Preprocess input data exactly as the model was trained
+    Ensures all expected features exist in the correct order
     """
     # Create DataFrame
     df = pd.DataFrame([input_dict])
     
-    # Convert Yes/No to 1/0 for binary features (LabelEncoder style)
+    # Convert Yes/No to 1/0 for binary features
     binary_cols = ['gender', 'Partner', 'Dependents', 'PhoneService', 'PaperlessBilling', 'SeniorCitizen']
     for col in binary_cols:
         if col in df.columns:
-            df[col] = (df[col] == 'Yes').astype(int) if col != 'gender' else (df[col] == 'Male').astype(int)
+            if col == 'gender':
+                df[col] = (df[col] == 'Male').astype(int)
+            else:
+                df[col] = (df[col] == 'Yes').astype(int)
     
     # One-hot encode categorical features
     ohe_cols = ['MultipleLines', 'InternetService', 'OnlineSecurity', 'OnlineBackup', 
                 'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies', 'Contract', 'PaymentMethod']
-    df = pd.get_dummies(df, columns=ohe_cols, drop_first=False)
+    df = pd.get_dummies(df, columns=ohe_cols, drop_first=False).astype(int)
     
     # Create engineered features
     tenure = input_dict['tenure']
@@ -200,6 +236,16 @@ def preprocess_input(input_dict):
     # TotalServices: count of active services
     service_cols = [col for col in df.columns if col.endswith('_Yes')]
     df['TotalServices'] = df[service_cols].sum(axis=1)
+    
+    # ✅ CRITICAL FIX: Ensure all expected features exist with correct order
+    if EXPECTED_FEATURES is not None:
+        # Add missing columns with 0 values
+        for col in EXPECTED_FEATURES:
+            if col not in df.columns:
+                df[col] = 0
+        
+        # Reorder columns to match training data exactly
+        df = df[EXPECTED_FEATURES]
     
     return df
 
@@ -238,7 +284,7 @@ if st.sidebar.button("🔮 Predict Churn", key="predict_button"):
                 st.sidebar.metric("Churn Probability", f"{prediction_proba[1]:.1%}")
             else:
                 st.sidebar.success("✅ **NO CHURN RISK**")
-                st.sidebar.metric("Retention Probability", f"{prediction_proba[0]:.1%}")
+                st.sidebar.metric("Retention Probability", f"{prediction_proba[0]:.1%}"))
                 
         except Exception as e:
             st.sidebar.error(f"❌ Prediction error: {e}")
