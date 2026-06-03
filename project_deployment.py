@@ -8,7 +8,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 
 # Load the model
-model_path = BASE_DIR / 'churn_customer.sav'
+model_path = BASE_DIR / 'churn_customer_coefficients.sav'
 data_path = BASE_DIR / 'WA_Fn-UseC_-Telco-Customer-Churn.csv'
 
 try:
@@ -46,7 +46,7 @@ try:
     if 'Churn' in df_data.columns:
         df_data.drop('Churn', axis=1, inplace=True)
     
-    # Feature engineering
+    # Feature engineering - Enhanced
     df_data['ChargesPerMonth'] = df_data['TotalCharges'] / (df_data['tenure'] + 1)
     df_data['Charge_x_Tenure'] = df_data['MonthlyCharges'] * df_data['tenure']
     df_data['TenureBucket'] = np.where(df_data['tenure'] <= 12, 0, 
@@ -55,6 +55,18 @@ try:
     
     service_cols = [col for col in df_data.columns if col.endswith('_Yes')]
     df_data['TotalServices'] = df_data[service_cols].sum(axis=1)
+    
+    # Additional advanced features
+    df_data['MonthlyToTotalRatio'] = df_data['MonthlyCharges'] / (df_data['TotalCharges'] + 1)
+    df_data['ChargeAcceleration'] = (df_data['MonthlyCharges'] - df_data['ChargesPerMonth']) / (df_data['ChargesPerMonth'] + 1)
+    df_data['AvgMonthlySpend'] = df_data['TotalCharges'] / (df_data['tenure'] + 1)
+    df_data['ServiceAdoptionRate'] = df_data['TotalServices'] / 13  # 13 possible services
+    df_data['TenureMonths'] = df_data['tenure']
+    df_data['ChargeCategory'] = pd.cut(df_data['MonthlyCharges'], bins=[0, 30, 60, 100, 200], labels=[0, 1, 2, 3])
+    df_data['TenureCategory'] = pd.cut(df_data['tenure'], bins=[-1, 6, 12, 24, 72], labels=[0, 1, 2, 3])
+    df_data['IsHighValue'] = (df_data['TotalCharges'] > df_data['TotalCharges'].median()).astype(int)
+    df_data['IsNewCustomer'] = (df_data['tenure'] <= 3).astype(int)
+    df_data['MonthlyCost_Per_Service'] = df_data['MonthlyCharges'] / (df_data['TotalServices'] + 1)
     
     # Get expected feature names and order
     EXPECTED_FEATURES = df_data.columns.tolist()
@@ -224,7 +236,7 @@ def preprocess_input(input_dict):
                 'DeviceProtection', 'TechSupport', 'StreamingTV', 'StreamingMovies', 'Contract', 'PaymentMethod']
     df = pd.get_dummies(df, columns=ohe_cols, drop_first=False).astype(int)
     
-    # Create engineered features
+    # Create engineered features - Enhanced
     tenure = input_dict['tenure']
     monthly = input_dict['MonthlyCharges']
     total = input_dict['TotalCharges']
@@ -236,6 +248,18 @@ def preprocess_input(input_dict):
     # TotalServices: count of active services
     service_cols = [col for col in df.columns if col.endswith('_Yes')]
     df['TotalServices'] = df[service_cols].sum(axis=1)
+    
+    # Advanced features
+    df['MonthlyToTotalRatio'] = monthly / (total + 1)
+    df['ChargeAcceleration'] = (monthly - (total / (tenure + 1))) / ((total / (tenure + 1)) + 1)
+    df['AvgMonthlySpend'] = total / (tenure + 1)
+    df['ServiceAdoptionRate'] = df['TotalServices'] / 13
+    df['TenureMonths'] = tenure
+    df['ChargeCategory'] = np.where(monthly <= 30, 0, np.where(monthly <= 60, 1, np.where(monthly <= 100, 2, 3)))
+    df['TenureCategory'] = np.where(tenure <= 6, 0, np.where(tenure <= 12, 1, np.where(tenure <= 24, 2, 3)))
+    df['IsHighValue'] = 1 if total > 3000 else 0  # Threshold based on median
+    df['IsNewCustomer'] = 1 if tenure <= 3 else 0
+    df['MonthlyCost_Per_Service'] = monthly / (df['TotalServices'] + 1)
     
     # ✅ CRITICAL FIX: Ensure all expected features exist with correct order
     if EXPECTED_FEATURES is not None:
@@ -267,6 +291,22 @@ with col2:
         max_val = features_info[feat]['max']
         st.write(f"• {feat}: {min_val} - {max_val}")
 
+# Display engineered features
+st.subheader("⚙️ Engineered Features")
+st.write("""
+The model automatically computes these advanced features from your input:
+- **ChargesPerMonth**: Average monthly charge (TotalCharges / Tenure)
+- **Charge_x_Tenure**: Interaction between monthly charges and tenure
+- **MonthlyToTotalRatio**: Proportion of total charges that are monthly
+- **ChargeAcceleration**: Rate of charge increase over time
+- **ServiceAdoptionRate**: Percentage of available services customer uses
+- **IsNewCustomer**: Whether customer is within first 3 months
+- **IsHighValue**: Whether customer's total charges are above median
+- **ChargeCategory**: Monthly charge bracket (Low/Medium/High/Premium)
+- **TenureCategory**: Customer loyalty category based on months with company
+- **MonthlyCost_Per_Service**: Average cost per active service
+""")
+
 # Predict button
 if st.sidebar.button("🔮 Predict Churn", key="predict_button"):
     if model is not None:
@@ -278,17 +318,63 @@ if st.sidebar.button("🔮 Predict Churn", key="predict_button"):
             prediction = model.predict(df_processed)[0]
             prediction_proba = model.predict_proba(df_processed)[0]
             
-            # Display result
-            if prediction == 1:
-                st.sidebar.success("⚠️ **CHURN RISK DETECTED**")
-                st.sidebar.metric("Churn Probability", f"{prediction_proba[1]:.1%}")
-            else:
-                st.sidebar.success("✅ **NO CHURN RISK**")
-                st.sidebar.metric("Retention Probability", f"{prediction_proba[0]:.1%}"))
+            # Extract feature values for insights
+            tenure = input_values['tenure']
+            monthly_charges = input_values['MonthlyCharges']
+            total_charges = input_values['TotalCharges']
+            
+            # Display result with enhanced insights
+            st.divider()
+            st.header("🔮 Prediction Results")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if prediction == 1:
+                    st.error("⚠️ **HIGH CHURN RISK**")
+                    churn_risk = prediction_proba[1] * 100
+                    retention_rate = 100 - churn_risk
+                    st.metric("Churn Risk Score", f"{churn_risk:.1f}%")
+                    st.metric("Retention Rate", f"{retention_rate:.1f}%")
+                else:
+                    st.success("✅ **LOW CHURN RISK**")
+                    churn_risk = prediction_proba[1] * 100
+                    retention_rate = 100 - churn_risk
+                    st.metric("Churn Risk Score", f"{churn_risk:.1f}%")
+                    st.metric("Retention Rate", f"{retention_rate:.1f}%")
+            
+            with col2:
+                st.write("**Customer Profile Summary:**")
+                st.write(f"• Tenure: {tenure} months")
+                st.write(f"• Monthly Charges: ${monthly_charges:.2f}")
+                st.write(f"• Total Charges: ${total_charges:.2f}")
+                service_count = sum([1 for v in input_values.values() if v == 'Yes'])
+                st.write(f"• Active Services: {service_count}")
+            
+            # Insights based on engineered features
+            st.subheader("💡 Key Insights")
+            
+            if tenure <= 3:
+                st.info("⏰ **New Customer Alert**: Customer is within first 3 months. Early engagement crucial!")
+            
+            if tenure > 24:
+                st.success("👑 **Loyal Customer**: Long-term relationship. Priority retention candidate!")
+            
+            if monthly_charges > 100:
+                st.warning(f"💰 **High Value Customer**: Monthly spend (${monthly_charges:.2f}) above average. Churn would be costly!")
+            
+            if total_charges > 5000:
+                st.info(f"💼 **Premium Customer**: High lifetime value (${total_charges:.2f}). Deserves VIP support.")
+            
+            service_adoption = service_count / 13
+            if service_adoption < 0.3:
+                st.warning("📱 **Low Service Adoption**: Customer using <30% of available services. Cross-sell opportunity!")
+            elif service_adoption > 0.7:
+                st.success("🌟 **High Engagement**: Customer using >70% of services. Strong account health!")
                 
         except Exception as e:
-            st.sidebar.error(f"❌ Prediction error: {e}")
-            st.sidebar.info(f"Debug: {str(e)}")
+            st.error(f"❌ Prediction error: {e}")
+            st.info(f"Debug: {str(e)}")
     else:
-        st.sidebar.error("❌ Model not loaded")
+        st.error("❌ Model not loaded")
 
